@@ -38,14 +38,17 @@ struct IWI
 
 	bool read_from_memory(BinaryReader &rd)
 	{
-		u8 hdr[4];
+		u8 magic[3];
 		for (int i = 0; i < 3; i++)
-			hdr[i] = rd.read<u8>();
-		hdr[3] = rd.read<u8>() + '0';
+			magic[i] = rd.read<u8>();
+		u8 version = rd.read<u8>();
 
-		if (hdr[0] != 'I' || hdr[1] != 'W' || hdr[2] != 'i' || hdr[3] != '5')
+		// IWi5 = CoD4 (IW3); IWi6 = CoD:WaW / MW2 / MW3 / Ghosts / BO2 etc.
+		// The fields read below (format, usage, dimensions, mip-offset table)
+		// share the same layout across both versions, so accept either one.
+		if (magic[0] != 'I' || magic[1] != 'W' || magic[2] != 'i' || (version != 5 && version != 6))
 		{
-			rd.set_error_message("unsupported IWI file '%c%c%c%c'\n", hdr[0], hdr[1], hdr[2], hdr[3]);
+			rd.set_error_message("unsupported IWI file '%c%c%c%d'\n", magic[0], magic[1], magic[2], version);
 			return false;
 		}
 
@@ -55,12 +58,20 @@ struct IWI
 		width = rd.read<u16>();
 		height = rd.read<u16>();
 
-		rd.skip(2);
+		rd.skip(2); // depth
 
 		u32 filesize = rd.read<u32>();
-		u32 texture_offset = rd.read<u32>();
-		texture_data_ptr = rd.buffer() + texture_offset;
-		texture_data_sz = filesize - texture_offset;
+
+		// The mip-offset table that follows is unreliable for images stored with
+		// a single mip level (every entry equals the file size, e.g. lens
+		// textures with the no-mipmap flag). The full-resolution mip is always
+		// the last block in the file, so derive its size from the dimensions and
+		// take the trailing bytes instead of trusting the table.
+		size_t blockbytes = (format == FORMAT_TYPE::DXT1) ? 8 : 16;
+		size_t blocksw = (width + 3) / 4; if (blocksw == 0) blocksw = 1;
+		size_t blocksh = (height + 3) / 4; if (blocksh == 0) blocksh = 1;
+		texture_data_sz = blocksw * blocksh * blockbytes;
+		texture_data_ptr = rd.buffer() + (filesize - texture_data_sz);
 		//printf("width=%d,height=%d,format=%d,usage=%d,texture_data_sz=%d\n", width, height, format, usage, texture_data_sz);
 		//getchar();
 		return true;
@@ -84,6 +95,10 @@ struct IWI
 		if (format == FORMAT_TYPE::DXT1)
 		{
 			hdr->sPixelFormat.dwFourCC = ('D' << 0) | ('X' << 8) | ('T' << 16) | ('1' << 24);
+		}
+		else if (format == FORMAT_TYPE::DXT3)
+		{
+			hdr->sPixelFormat.dwFourCC = ('D' << 0) | ('X' << 8) | ('T' << 16) | ('3' << 24);
 		}
 		else
 		{
