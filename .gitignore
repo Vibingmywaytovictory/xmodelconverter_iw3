@@ -8,3 +8,6 @@
 Debug/
 Release/
 .vs/
+chat.md
+glm/
+build/Release/

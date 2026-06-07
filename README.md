@@ -1,12 +1,14 @@
-# xmodelconverter
-A converter for xmodel & xanim files for Call of Duty.
+# xmodelconverteriw3
+A converter for xmodel & xanim files for Call of Duty 4.
+
+If you couldn't tell already, the changes were vibe coded with Claude.
 
 It converts xmodel & xanim files back into xmodel_export and xanim_export text readable files.
 These _export files can then be more easily read and imported into 3d modelling software such as Blender (https://blender.org).
 
 ## Supported games
-- ~~Call of Duty~~ (not available at this moment)
 - Call of Duty 2
+- Call of Duty 4 (vibed version)
 
 ## Usage
 
@@ -37,9 +39,7 @@ https://github.com/g-truc/glm
 ## Building
 
 ```
-sudo apt install libglm-dev
-git clone https://github.com/riicchhaarrd/xmodelconverter
-g++ -w *.cpp -o xmodelconverter
+dunno use claude or somethin im retarded
 ```
 
 ## Blender

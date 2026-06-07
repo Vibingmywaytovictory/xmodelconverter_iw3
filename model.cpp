@@ -6,11 +6,13 @@ bool XModel::read_xmodel_file(BinaryReader& rd)
 	viewhands = rd.get_path().find("viewmodel_hands") != std::string::npos;
 
 	u16 version = rd.read<u16>();
-	if (version != 0x14)
-		return rd.set_error_message("expected xmodel version 0x14, got %x\n", version);
+	if (version != 0x14 && version != 0x19)
+		return rd.set_error_message("expected xmodel version 0x14 or 0x19, got %x\n", version);
 	u8 flags = rd.read<u8>();
 	vec3 mins = rd.read<vec3>();
 	vec3 maxs = rd.read<vec3>();
+	if (version == 0x19)
+		rd.read<u8>(); // CoD4 v25: one extra byte after maxs
 	printf("version = %d\n", version);
 	printf("flags = %02X\n", flags & 0xff);
 	printf("mins = %f,%f,%f\n", mins.x, mins.y, mins.z);
@@ -166,13 +168,31 @@ bool XModel::export_file(const std::string& filename)
 		fprintf(fp, "\n");
 	}
 
+	// Build deduplicated material list and remap mesh → unique material index
+	std::vector<std::string> unique_materials;
+	std::vector<int> mat_remap(this->materials.size(), 0);
+	for (int i = 0; i < (int)this->materials.size(); ++i)
+	{
+		auto it = std::find(unique_materials.begin(), unique_materials.end(), this->materials[i]);
+		if (it == unique_materials.end())
+		{
+			mat_remap[i] = (int)unique_materials.size();
+			unique_materials.push_back(this->materials[i]);
+		}
+		else
+		{
+			mat_remap[i] = (int)(it - unique_materials.begin());
+		}
+	}
+
 	fprintf(fp, "NUMFACES %d\n", surface.numfaces());
 	int meshindex = 0;
 	for (auto& m : surface.meshes)
 	{
+		int mat_idx = (meshindex < (int)mat_remap.size()) ? mat_remap[meshindex] : 0;
 		for (int i = 0; i < m.indices.size(); i += 3)
 		{
-			fprintf(fp, "TRI %d %d 0 0\n", meshindex, meshindex);
+			fprintf(fp, "TRI %d %d 0 0\n", meshindex, mat_idx);
 			auto& v1 = surface.vertices[m.indices[i]];
 			auto& v2 = surface.vertices[m.indices[i + 1]];
 			auto& v3 = surface.vertices[m.indices[i + 2]];
@@ -196,11 +216,11 @@ bool XModel::export_file(const std::string& filename)
 		++meshindex;
 	}
 	fprintf(fp, "\n");
-	fprintf(fp, "NUMMATERIALS %d\n", this->materials.size());
+	fprintf(fp, "NUMMATERIALS %d\n", unique_materials.size());
 	int matindex = 0;
-	for (auto& mat : this->materials)
+	for (auto& mat : unique_materials)
 	{
-		fprintf(fp, "MATERIAL %d \"%s\" \"Lambert\" \"test.jpg\"\n", matindex++, mat.c_str());
+		fprintf(fp, "MATERIAL %d \"%s\" \"Lambert\" \"%s.tga\"\n", matindex++, mat.c_str(), mat.c_str());
 		fprintf(fp, "COLOR 0.000000 0.000000 0.000000 1.000000\n");
 		fprintf(fp, "TRANSPARENCY 0.000000 0.000000 0.000000 1.000000\n");
 		fprintf(fp, "AMBIENTCOLOR 0.000000 0.000000 0.000000 1.000000\n");

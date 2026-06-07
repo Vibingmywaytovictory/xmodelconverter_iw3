@@ -5,8 +5,8 @@
 bool XModelParts::read_xmodelparts_file(XModel &xm, BinaryReader &rd)
 {
 	u16 version = rd.read<u16>();
-	if (version != 0x14)
-		return rd.set_error_message("expected xmodelparts version 0x14, got %x\n", version);
+	if (version != 0x14 && version != 0x19)
+		return rd.set_error_message("expected xmodelparts version 0x14 or 0x19, got %x\n", version);
 
 	this->numbonesrelative = rd.read<u16>();
 	this->numbonesabsolute = rd.read<u16>();
@@ -21,7 +21,19 @@ bool XModelParts::read_xmodelparts_file(XModel &xm, BinaryReader &rd)
 	{
 		int parent = rd.read<i8>();
 		vec3 trans = rd.read<vec3>();
-		quat rot = rd.read_quat();
+		quat rot;
+		if (version == 0x19) {
+			// CoD4 v25: quaternion stored as 3 packed i16 values; w is reconstructed
+			i16 qx = rd.read<i16>(), qy = rd.read<i16>(), qz = rd.read<i16>();
+			rot.x = qx / 32767.0f;
+			rot.y = qy / 32767.0f;
+			rot.z = qz / 32767.0f;
+			float w2 = 1.0f - rot.x*rot.x - rot.y*rot.y - rot.z*rot.z;
+			rot.w = (w2 > 0.0f) ? sqrtf(w2) : 0.0f;
+			rot = glm::normalize(rot);
+		} else {
+			rot = rd.read_quat();
+		}
 
 		this->bones[i + numbonesabsolute].transform.rotation = rot;
 		this->bones[i + numbonesabsolute].transform.translation = trans;

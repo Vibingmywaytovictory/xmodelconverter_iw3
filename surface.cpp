@@ -5,8 +5,8 @@ bool XModelSurface::read_xmodelsurface_file(XModelParts &parts, BinaryReader &rd
 {
 	this->clear();
 	u16 version = rd.read<u16>();
-	if (version != 0x14)
-		return rd.set_error_message("expected xmodelsurface version 0x14, got %x\n", version);
+	if (version != 0x14 && version != 0x19)
+		return rd.set_error_message("expected xmodelsurface version 0x14 or 0x19, got %x\n", version);
 	//printf("xmodelsurface version %d\n", version);
 
 	//used for checking against xmodel numsurfs for file version conflict (e.g iwd/non-iwd)
@@ -17,8 +17,18 @@ bool XModelSurface::read_xmodelsurface_file(XModelParts &parts, BinaryReader &rd
 	{
 		std::vector<Vertex> vertices;
 		u8 tilemode = rd.read<u8>();
+		if (version == 0x19) {
+			// CoD4 v25: two extra bytes in surface header before vertcount
+			rd.read<u8>();
+			rd.read<u8>();
+		}
 		u16 vertcount = rd.read<u16>();
 		u16 tricount = rd.read<u16>();
+		if (version == 0x19) {
+			// CoD4 v25: two extra u16 fields between tricount and boneoffset
+			rd.read<u16>();
+			rd.read<u16>();
+		}
 		i16 boneoffset = rd.read<i16>();
 		if (boneoffset == -1)
 		{
