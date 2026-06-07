@@ -187,15 +187,53 @@ bool convert_iwi_to_dds(const std::string& path, const std::string& export_path)
 	return false;
 }
 
-bool get_color_map_from_material_file(const std::string& path, std::string& color_map)
+struct MaterialMaps
+{
+	std::string color, normal, spec;
+};
+
+bool get_maps_from_material_file(const std::string& path, MaterialMaps& maps)
 {
 	BinaryReader rd;
 
 	if (!rd.open_path(path))
 		return false;
-	u32 material_offset = rd.read<u32>();
-	u32 color_map_offset = rd.read<u32>();
-	color_map = (char*)(rd.buffer() + color_map_offset);
+
+	const u8* base = rd.buffer();
+	size_t sz = rd.m_buf.size();
+
+	// Return a null-terminated string at file offset 'off' if it lies within
+	// the buffer, otherwise nullptr.
+	auto str_at = [&](u32 off) -> const char*
+	{
+		if (off == 0 || off >= sz)
+			return nullptr;
+		// make sure it's actually terminated inside the buffer
+		for (size_t i = off; i < sz; ++i)
+			if (base[i] == 0)
+				return (const char*)(base + off);
+		return nullptr;
+	};
+
+	// The material's texture table is a sequence of 12-byte entries:
+	//   u32 semanticNamePtr, u32 typeFlags, u32 imageNamePtr
+	// Locate each entry by matching its semantic name string; the image name
+	// for that slot is the pointer 8 bytes later.
+	for (size_t o = 8; o + 12 <= sz; o += 4)
+	{
+		const char* sem = str_at(*(const u32*)(base + o));
+		if (!sem)
+			continue;
+		const char* img = str_at(*(const u32*)(base + o + 8));
+		if (!img)
+			continue;
+		if (!strcmp(sem, "colorMap"))
+			maps.color = img;
+		else if (!strcmp(sem, "normalMap"))
+			maps.normal = img;
+		else if (!strcmp(sem, "specularMap"))
+			maps.spec = img;
+	}
 	return true;
 }
 
@@ -241,28 +279,37 @@ int main(int argc, char** argv)
 			XModel xm;
 			if (!read_model(xm, basepath, path, valid_xmodel))
 				break;
-			//convert all model materials
+			//convert all model materials (color, normal and specular maps)
 			for (auto& mat : xm.materials)
 			{
 				std::string materialpath = basepath + "materials";
 				materialpath += path_seperator;
 				materialpath += mat;
-				std::string color_map;
-				get_color_map_from_material_file(materialpath, color_map);
+				MaterialMaps maps;
+				get_maps_from_material_file(materialpath, maps);
 
-				printf("material: %s, color: %s\n", materialpath.c_str(), color_map.c_str());
+				printf("material: %s, color: %s, normal: %s, spec: %s\n",
+					materialpath.c_str(), maps.color.c_str(), maps.normal.c_str(), maps.spec.c_str());
 
-				std::string color_map_path = basepath + "images";
-				color_map_path += path_seperator;
-				color_map_path += color_map + ".iwi";
-				std::string color_map_export_path = basepath + "exported";
-				color_map_export_path += path_seperator;
-				color_map_export_path += color_map + ".dds";
-
-				if (!processed[color_map] && convert_iwi_to_dds(color_map_path, color_map_export_path))
+				const std::string* mapnames[3] = { &maps.color, &maps.normal, &maps.spec };
+				for (int mi = 0; mi < 3; ++mi)
 				{
-					printf("converted %s\n", color_map.c_str());
-					processed[color_map] = true;
+					const std::string& image = *mapnames[mi];
+					if (image.empty())
+						continue;
+
+					std::string iwi_path = basepath + "images";
+					iwi_path += path_seperator;
+					iwi_path += image + ".iwi";
+					std::string dds_path = basepath + "exported";
+					dds_path += path_seperator;
+					dds_path += image + ".dds";
+
+					if (!processed[image] && convert_iwi_to_dds(iwi_path, dds_path))
+					{
+						printf("converted %s\n", image.c_str());
+						processed[image] = true;
+					}
 				}
 			}
 			for (auto& lod : xm.lodstrings)
