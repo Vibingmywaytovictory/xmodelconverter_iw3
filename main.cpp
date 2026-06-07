@@ -279,6 +279,13 @@ int main(int argc, char** argv)
 			XModel xm;
 			if (!read_model(xm, basepath, path, valid_xmodel))
 				break;
+			//converted textures go into exported/images so the exported folder
+			//stays tidy; make sure that subfolder exists first
+			std::string images_export_dir = basepath + "exported";
+			images_export_dir += path_seperator;
+			images_export_dir += "images";
+			util::make_directory(images_export_dir);
+
 			//convert all model materials (color, normal and specular maps)
 			for (auto& mat : xm.materials)
 			{
@@ -301,7 +308,7 @@ int main(int argc, char** argv)
 					std::string iwi_path = basepath + "images";
 					iwi_path += path_seperator;
 					iwi_path += image + ".iwi";
-					std::string dds_path = basepath + "exported";
+					std::string dds_path = images_export_dir;
 					dds_path += path_seperator;
 					dds_path += image + ".dds";
 

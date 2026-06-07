@@ -5,6 +5,8 @@
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
+#else
+#include <sys/stat.h>
 #endif
 
 #ifndef _WIN32
@@ -42,6 +44,15 @@ namespace util
 		glm::quat rot = transform.rotation * bone.transform.rotation;
 		glm::vec3 trans = glm::rotate(transform.rotation, bone.transform.translation) + transform.translation;
 		return Transform(rot, trans);
+	}
+
+	static void make_directory(const std::string& path)
+	{
+#ifdef _WIN32
+		CreateDirectoryA(path.c_str(), NULL);
+#else
+		mkdir(path.c_str(), 0777);
+#endif
 	}
 
 	static bool directory_exists(const std::string& szPath)
