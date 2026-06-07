@@ -23,30 +23,40 @@ bool XModelSurface::read_xmodelsurface_file(XModelParts &parts, BinaryReader &rd
 		if (version == 0x19)
 		{
 			// CoD4/MW (v25) surface header.
-			//   tileMode(1) unk(2) vertCount(2) triCount(2) physiqued(2) ...
-			// The 'physiqued' field equals vertCount for RIGID surfaces (single
-			// default bone, 13-byte header, fixed 60-byte verts). When it differs
-			// the surface is SKINNED (per-vertex bone index + optional blend
-			// weights, 19-byte header, variable-size verts).
+			//   tileMode(1) unk(2) vertCount(2) triCount(2) firstGroup(2) ...
+			// RIGID surfaces repeat vertCount in 'firstGroup', then a default bone
+			// index and a single 0 (13-byte header, fixed 60-byte verts bound to
+			// one bone). SKINNED surfaces instead store a variable-length list of
+			// (groupVertCount, bonesPerVert) pairs terminated by a (0,0) pair; the
+			// group counts sum to vertCount, so the header length varies (e.g. 19
+			// bytes for 2 groups, 23 bytes for 3).
 			// NOTE: the previous code used a fixed header length and read the
 			// rigid/skinned flag from the wrong offset, so it never detected
 			// skinned surfaces and desynced (crash) on skinned models.
 			rd.read<u16>();                 // unknown per-surface value (hash)
 			vertcount = rd.read<u16>();
 			tricount = rd.read<u16>();
-			u16 physiqued = rd.read<u16>();
-			bool skinned = (physiqued != vertcount);
+			u16 firstgroup = rd.read<u16>();
+			bool skinned = (firstgroup != vertcount);
 			if (skinned)
 			{
-				// remaining 5 shorts complete the 19-byte skinned header
-				for (int h = 0; h < 5; ++h)
-					rd.read<u16>();
+				// 'firstgroup' was the vertex count of the first weight group;
+				// walk the remaining (count, bonesPerVert) pairs up to the (0,0)
+				// terminator so we consume exactly this surface's header.
+				rd.read<u16>();             // bonesPerVert of the first group
+				for (;;)
+				{
+					u16 groupcount = rd.read<u16>();
+					rd.read<u16>();         // bonesPerVert (or terminator's second half)
+					if (groupcount == 0)
+						break;
+				}
 				boneoffset = -1;            // triggers per-vertex skinning below
 			}
 			else
 			{
 				// remaining 2 shorts complete the 13-byte rigid header
-				rd.read<u16>();             // surface skin bone (geometry is model-space)
+				rd.read<u16>();             // default skin bone (geometry is model-space)
 				rd.read<u16>();
 				boneoffset = 0;             // rigid verts bind to root bone 0
 			}
