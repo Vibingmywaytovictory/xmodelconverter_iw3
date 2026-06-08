@@ -20,6 +20,8 @@ bool XModelSurface::read_xmodelsurface_file(XModelParts &parts, BinaryReader &rd
 		u16 vertcount;
 		u16 tricount;
 		i16 boneoffset;
+		i16 weightbone = 0;        // rigid v25: bone to weight verts to (position stays model-space)
+		bool rigid_modelspace = false;
 		if (version == 0x19)
 		{
 			// CoD4/MW (v25) surface header.
@@ -55,10 +57,16 @@ bool XModelSurface::read_xmodelsurface_file(XModelParts &parts, BinaryReader &rd
 			}
 			else
 			{
-				// remaining 2 shorts complete the 13-byte rigid header
-				rd.read<u16>();             // default skin bone (geometry is model-space)
+				// Rigid v25 surfaces store geometry in MODEL space plus one
+				// "default skin bone" the whole surface rides with during
+				// animation (it is NOT a coordinate origin). Keep the
+				// model-space positioning but record the real bind bone so the
+				// verts land in their proper weight group instead of all
+				// collapsing onto the root.
+				weightbone = rd.read<u16>(); // default skin bone (previously discarded)
 				rd.read<u16>();
-				boneoffset = 0;             // rigid verts bind to root bone 0
+				boneoffset = 0;              // verts are model-space; position via root
+				rigid_modelspace = true;
 			}
 		}
 		else
@@ -104,7 +112,9 @@ bool XModelSurface::read_xmodelsurface_file(XModelParts &parts, BinaryReader &rd
 			offset = rd.read<vec3>();
 			vtx.numweights = numweights + 1;
 			vtx.boneweights[0] = 1.f;
-			vtx.boneindices[0] = boneindex;
+			// Rigid v25 verts keep their model-space position (transformed by
+			// the root below) but must be weighted to their real bind bone.
+			vtx.boneindices[0] = rigid_modelspace ? (u16)weightbone : boneindex;
 
 			if (numweights > 0)
 			{
