@@ -263,6 +263,7 @@ struct XAnim
 	u8 m_flags;
 	u16 m_framerate;
 	float m_frequency;
+	bool m_valid = true; //cleared if a v17 stream desyncs (unsupported variant)
 
 	std::map<int, XAnimFrame> m_animframes;
 	std::vector<std::vector<Bone>> m_refframes;

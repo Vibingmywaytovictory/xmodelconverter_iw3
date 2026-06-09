@@ -1,11 +1,48 @@
 #include "types.h"
 #include "util.h"
+#include <glm/gtc/quaternion.hpp>
+#include <iterator>
+
+// Sample a sorted keyframe track at an arbitrary frame, interpolating between
+// the surrounding keys (slerp for rotation, lerp for translation) and clamping
+// to the first/last key outside the keyed range. The CoD mod tools store sparse
+// keyframes and interpolate on export, so we do the same to reproduce them.
+static glm::quat sample_rotation(const std::map<int, glm::quat>& keys, int frame)
+{
+	auto hi = keys.lower_bound(frame);
+	if (hi == keys.end())
+		return keys.rbegin()->second;
+	if (hi->first == frame || hi == keys.begin())
+		return hi->second;
+	auto lo = std::prev(hi);
+	float t = (float)(frame - lo->first) / (float)(hi->first - lo->first);
+	return glm::slerp(lo->second, hi->second, t);
+}
+
+static vec3 sample_translation(const std::map<int, vec3>& keys, int frame)
+{
+	auto hi = keys.lower_bound(frame);
+	if (hi == keys.end())
+		return keys.rbegin()->second;
+	if (hi->first == frame || hi == keys.begin())
+		return hi->second;
+	auto lo = std::prev(hi);
+	float t = (float)(frame - lo->first) / (float)(hi->first - lo->first);
+	return lo->second * (1.f - t) + hi->second * t;
+}
 
 void XAnim::read_translations(const std::string& tag)
 {
 	u16 numtrans = m_reader->read<u16>();
 	if (numtrans == 0)
 		return;
+	// A count larger than the frame count means the stream has desynced
+	// (unsupported variant); bail before doing any huge reads.
+	if (numtrans > m_numframes + 1)
+	{
+		m_valid = false;
+		return;
+	}
 	vec3 v;
 	if (numtrans == 1)
 	{
@@ -17,7 +54,7 @@ void XAnim::read_translations(const std::string& tag)
 
 	std::vector<int> frames;
 
-	if (numtrans == 1 || numtrans == m_numframes)
+	if (numtrans == m_numframes)
 	{
 		for (int i = 0; i < numtrans; ++i)
 			frames.push_back(i);
@@ -33,11 +70,47 @@ void XAnim::read_translations(const std::string& tag)
 			frames.push_back(m_reader->read<u8>());
 	}
 
-	for (int i = 0; i < numtrans; ++i)
+	if (m_version == 0x11)
 	{
-		v = m_reader->read<vec3>();
-		//printf("trans frame %d -> %f,%f,%f\n", frames[i], v.x, v.y, v.z);
-		m_animframes[frames[i]].trans[tag] = v;
+		// CoD4/MW (v17): translations are quantized. After the frame indices
+		// come a flag byte, a vec3 minimum and a vec3 size (float), then one
+		// sample per key. flag==1 -> 3x u8 (value = mins + q/255 * size);
+		// flag==0 -> 3x u16 (value = mins + q/65535 * size), the higher-
+		// precision variant used by larger anims.
+		u8 flag = m_reader->read<u8>();
+		vec3 mins = m_reader->read<vec3>();
+		vec3 size = m_reader->read<vec3>();
+		for (int i = 0; i < numtrans; ++i)
+		{
+			if (flag == 1)
+			{
+				u8 qx = m_reader->read<u8>();
+				u8 qy = m_reader->read<u8>();
+				u8 qz = m_reader->read<u8>();
+				v.x = mins.x + (qx / 255.f) * size.x;
+				v.y = mins.y + (qy / 255.f) * size.y;
+				v.z = mins.z + (qz / 255.f) * size.z;
+			}
+			else
+			{
+				u16 qx = m_reader->read<u16>();
+				u16 qy = m_reader->read<u16>();
+				u16 qz = m_reader->read<u16>();
+				v.x = mins.x + (qx / 65535.f) * size.x;
+				v.y = mins.y + (qy / 65535.f) * size.y;
+				v.z = mins.z + (qz / 65535.f) * size.z;
+			}
+			m_animframes[frames[i]].trans[tag] = v;
+		}
+	}
+	else
+	{
+		for (int i = 0; i < numtrans; ++i)
+		{
+			v = m_reader->read<vec3>();
+			//printf("trans frame %d -> %f,%f,%f\n", frames[i], v.x, v.y, v.z);
+			m_animframes[frames[i]].trans[tag] = v;
+		}
 	}
 }
 
@@ -47,6 +120,12 @@ void XAnim::read_rotations(const std::string& tag, bool flipquat, bool simplequa
 	//printf("numrot=%d\n", numrot);
 	if (numrot == 0)
 		return;
+	// Sanity guard: more rotations than frames means the stream desynced.
+	if (numrot > m_numframes + 1)
+	{
+		m_valid = false;
+		return;
+	}
 
 	std::vector<int> frames;
 
@@ -80,13 +159,18 @@ void XAnim::read_rotations(const std::string& tag, bool flipquat, bool simplequa
 bool XAnim::read_xanim_file(BinaryReader &rd)
 {
 	m_reader = &rd;
+	m_valid = true;
 	m_version = rd.read<u16>();
-	if (m_version != 0xe)
-		return rd.set_error_message("expected xanim version 0xe, got %x\n", m_version);
+	if (m_version != 0xe && m_version != 0x11)
+		return rd.set_error_message("expected xanim version 0xe or 0x11, got %x\n", m_version);
 	m_numframes = rd.read<u16>();
 	m_numparts = rd.read<u16>();
 	m_flags = rd.read<u8>();
+	if (m_version == 0x11)
+		rd.read<u8>(); // v17: extra byte after flags
 	m_framerate = rd.read<u16>();
+	if (m_version == 0x11)
+		rd.read<u16>(); // v17: extra u16 after framerate
 
 	bool looping = (m_flags & 0x1) == 0x1;
 	bool delta = (m_flags & 0x2) == 0x2;
@@ -101,7 +185,9 @@ bool XAnim::read_xanim_file(BinaryReader &rd)
 
 	std::vector<std::string> partnames;
 
-	int boneflagssize = ((m_numparts - 1) >> 3) + 1;
+	// v14 uses ((numparts-1)>>3)+1 bytes per flag array; v17 uses numparts>>3
+	// (anims with fewer than 8 parts carry no flag bytes at all).
+	int boneflagssize = (m_version == 0x11) ? (m_numparts >> 3) : (((m_numparts - 1) >> 3) + 1);
 	std::vector<u8> flipflags = rd.read_typed_buffer_to_vector<u8>(boneflagssize);
 	std::vector<u8> simpleflags = rd.read_typed_buffer_to_vector<u8>(boneflagssize);
 	for (int i = 0; i < m_numparts; ++i)
@@ -113,58 +199,51 @@ bool XAnim::read_xanim_file(BinaryReader &rd)
 	}
 	for (int i = 0; i < m_numparts; ++i)
 	{
-		bool flipquat = ((1 << (i & 7)) & flipflags[i >> 3]) != 0;
-		bool simplequat = ((1 << (i & 7)) & simpleflags[i >> 3]) != 0;
+		bool flipquat = false;
+		bool simplequat = false;
+		if (m_version == 0xe)
+		{
+			// v17 keeps the flip/simple flag arrays but rotations are always
+			// 3x i16, so the flags only affect decoding for v14.
+			flipquat = ((1 << (i & 7)) & flipflags[i >> 3]) != 0;
+			simplequat = ((1 << (i & 7)) & simpleflags[i >> 3]) != 0;
+		}
 		read_rotations(partnames[i], flipquat, simplequat);
 		read_translations(partnames[i]);
+		if (!m_valid)
+			return rd.set_error_message("xanim stream desynced at part %d ('%s'); unsupported variant\n", i, partnames[i].c_str());
 	}
-	std::unordered_map<std::string, Bone> lastpose;
+
+	// Regroup the decoded keyframes per bone so we can sample every output
+	// frame, interpolating between sparse keys the way the mod tools do.
+	std::map<std::string, std::map<int, glm::quat>> rotkeys;
+	std::map<std::string, std::map<int, vec3>> transkeys;
+	for (auto& af : m_animframes)
+	{
+		for (auto& q : af.second.quats)
+			rotkeys[q.first][af.first] = q.second;
+		for (auto& t : af.second.trans)
+			transkeys[t.first][af.first] = t.second;
+	}
 
 	for (int i = 0; i < m_numframes; ++i)
 	{
-		auto fnd = m_animframes.find(i);
-		XAnimFrame* curframe = NULL;
-		if (fnd == m_animframes.end())
-		{
-			//printf("skipping frame %d\n", i);
-			continue;
-		}
-		else
-		{
-			curframe = &m_animframes[i];
-		}
 		std::vector<Bone> refframe;
 		refframe.resize(m_reference->parts.bones.size());
 		int refboneindex = 0;
 		for (auto& refbone : m_reference->parts.bones)
 		{
-			Bone xb = refbone;
-			if (lastpose.find(refbone.name) != lastpose.end())
-			{
-				xb = lastpose[refbone.name];
-			}
-			//xb.trans = glm::rotate(xb.rot, animframe_iterator.second.parts[refbone.name].trans) + xb.trans;
-			//xb.rot = xb.rot * animframe_iterator.second.parts[refbone.name].rot;
-			//additive animation
-			//TODO: FIXME add other relative and global
+			Bone xb = refbone; //start from the reference (bind) pose
 
-			//do we have a known good rotation?
-			if (curframe->quats.find(refbone.name) != curframe->quats.end())
-			{
-				//xb.rot = glm::slerp(xb.rot, curframe->quats[refbone.name], 0.5f);
-				xb.transform.rotation = curframe->quats[refbone.name];
-			}
+			auto rit = rotkeys.find(refbone.name);
+			if (rit != rotkeys.end() && !rit->second.empty())
+				xb.transform.rotation = sample_rotation(rit->second, i);
 
-			//do we have a known good translation?
-			if (curframe->trans.find(refbone.name) != curframe->trans.end())
-			{
-				//xb.trans = (xb.trans + curframe->trans[refbone.name]) / 2.f;
-				if (refbone.name == "tag_origin") //ignore any translations for tag_origin, so the animation moves on the spot
-					;
-				else
-					xb.transform.translation = curframe->trans[refbone.name];
-			}
-			lastpose[refbone.name] = xb;
+			auto tit = transkeys.find(refbone.name);
+			//ignore tag_origin translation so the animation plays on the spot
+			if (tit != transkeys.end() && !tit->second.empty() && refbone.name != "tag_origin")
+				xb.transform.translation = sample_translation(tit->second, i);
+
 			refframe[refboneindex] = xb;
 			++refboneindex;
 		}
