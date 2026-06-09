@@ -114,6 +114,42 @@ void XAnim::read_translations(const std::string& tag)
 	}
 }
 
+// Validate (without consuming) that a v17 translation block at 'pos' is
+// well-formed: a sane count, in-range ascending frame indices and a 0/1 flag.
+// Used as a one-bone lookahead to tell whether a rotation is stored as the
+// full 3x i16 form or the 2-byte single-axis form.
+bool XAnim::peek_translation_valid(size_t pos)
+{
+	const std::vector<char>& buf = m_reader->m_buf;
+	size_t n = buf.size();
+	auto u16at = [&](size_t p) -> int { return (u8)buf[p] | ((u8)buf[p + 1] << 8); };
+	if (pos + 2 > n)
+		return false;
+	int nt = u16at(pos);
+	if (nt == 0)
+		return true;
+	if (nt > m_numframes + 1)
+		return false;
+	if (nt == 1)
+		return pos + 2 + 12 <= n;
+	size_t il = (nt == m_numframes) ? 0 : ((m_numframes > 0xff) ? (size_t)nt * 2 : (size_t)nt);
+	if (pos + 2 + il + 1 > n)
+		return false;
+	if (il > 0)
+	{
+		int prev = -1;
+		for (int k = 0; k < nt; ++k)
+		{
+			int f = (m_numframes > 0xff) ? u16at(pos + 2 + 2 * k) : (u8)buf[pos + 2 + k];
+			if (f < prev || f > m_numframes)
+				return false;
+			prev = f;
+		}
+	}
+	u8 flag = (u8)buf[pos + 2 + il];
+	return flag == 0 || flag == 1;
+}
+
 void XAnim::read_rotations(const std::string& tag, bool flipquat, bool simplequat)
 {
 	u16 numrot = m_reader->read<u16>();
@@ -143,6 +179,16 @@ void XAnim::read_rotations(const std::string& tag, bool flipquat, bool simplequa
 	{
 		for (int i = 0; i < numrot; ++i)
 			frames.push_back(m_reader->read<u8>());
+	}
+
+	// v17: the simple-quat flag is only a *candidate*. Most flagged bones still
+	// store full 3x i16 rotations; only single-axis ones use the 2-byte form.
+	// Decide by checking whether reading full rotations would leave a valid
+	// translation block - if not, this bone uses the 2-byte form.
+	if (m_version == 0x11)
+	{
+		if (simplequat)
+			simplequat = !peek_translation_valid(m_reader->m_pos + (size_t)numrot * 6);
 	}
 
 	for (int i = 0; i < numrot; ++i)
@@ -203,10 +249,15 @@ bool XAnim::read_xanim_file(BinaryReader &rd)
 		bool simplequat = false;
 		if (m_version == 0xe)
 		{
-			// v17 keeps the flip/simple flag arrays but rotations are always
-			// 3x i16, so the flags only affect decoding for v14.
 			flipquat = ((1 << (i & 7)) & flipflags[i >> 3]) != 0;
 			simplequat = ((1 << (i & 7)) & simpleflags[i >> 3]) != 0;
+		}
+		else
+		{
+			// v17: pass the simple flag as a candidate; read_rotations confirms
+			// the actual 2-byte vs 6-byte form via a translation-block lookahead.
+			if ((i >> 3) < (int)simpleflags.size())
+				simplequat = ((1 << (i & 7)) & simpleflags[i >> 3]) != 0;
 		}
 		read_rotations(partnames[i], flipquat, simplequat);
 		read_translations(partnames[i]);

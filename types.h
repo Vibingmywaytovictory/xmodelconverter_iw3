@@ -270,6 +270,7 @@ struct XAnim
 
 	void read_translations(const std::string& tag);
 	void read_rotations(const std::string& tag, bool flipquat, bool simplequat);
+	bool peek_translation_valid(size_t pos); //lookahead: is a v17 translation block well-formed at pos?
 	bool read_xanim_file(BinaryReader&);
 	bool export_file(const std::string& filename);
 };
