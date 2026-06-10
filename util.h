@@ -46,12 +46,41 @@ namespace util
 		return Transform(rot, trans);
 	}
 
+	static std::string to_lower(const std::string& s)
+	{
+		std::string r = s;
+		for (char& c : r)
+			if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+		return r;
+	}
+
 	static void make_directory(const std::string& path)
 	{
 #ifdef _WIN32
 		CreateDirectoryA(path.c_str(), NULL);
 #else
 		mkdir(path.c_str(), 0777);
+#endif
+	}
+
+	// Return the full path of the first *.XMODEL_EXPORT file in 'dir', or "" if none.
+	static std::string find_first_xmodel_export(const std::string& dir, int sep)
+	{
+#ifdef _WIN32
+		std::string pattern = dir;
+		pattern += (char)sep;
+		pattern += "*.XMODEL_EXPORT";
+		WIN32_FIND_DATAA fd;
+		HANDLE h = FindFirstFileA(pattern.c_str(), &fd);
+		if (h == INVALID_HANDLE_VALUE)
+			return "";
+		std::string result = dir;
+		result += (char)sep;
+		result += fd.cFileName;
+		FindClose(h);
+		return result;
+#else
+		return "";
 #endif
 	}
 

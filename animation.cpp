@@ -269,12 +269,14 @@ bool XAnim::read_xanim_file(BinaryReader &rd)
 	// frame, interpolating between sparse keys the way the mod tools do.
 	std::map<std::string, std::map<int, glm::quat>> rotkeys;
 	std::map<std::string, std::map<int, vec3>> transkeys;
+	// Key by lowercased bone name: binary part names are lowercase but the rig
+	// reference bones are mixed case (e.g. J_Shoulder_LE).
 	for (auto& af : m_animframes)
 	{
 		for (auto& q : af.second.quats)
-			rotkeys[q.first][af.first] = q.second;
+			rotkeys[util::to_lower(q.first)][af.first] = q.second;
 		for (auto& t : af.second.trans)
-			transkeys[t.first][af.first] = t.second;
+			transkeys[util::to_lower(t.first)][af.first] = t.second;
 	}
 
 	for (int i = 0; i < m_numframes; ++i)
@@ -285,15 +287,24 @@ bool XAnim::read_xanim_file(BinaryReader &rd)
 		for (auto& refbone : m_reference->parts.bones)
 		{
 			Bone xb = refbone; //start from the reference (bind) pose
+			std::string key = util::to_lower(refbone.name);
 
-			auto rit = rotkeys.find(refbone.name);
+			auto rit = rotkeys.find(key);
 			if (rit != rotkeys.end() && !rit->second.empty())
 				xb.transform.rotation = sample_rotation(rit->second, i);
 
-			auto tit = transkeys.find(refbone.name);
+			auto tit = transkeys.find(key);
 			//ignore tag_origin translation so the animation plays on the spot
-			if (tit != transkeys.end() && !tit->second.empty() && refbone.name != "tag_origin")
-				xb.transform.translation = sample_translation(tit->second, i);
+			if (tit != transkeys.end() && !tit->second.empty() && key != "tag_origin")
+			{
+				vec3 anim_t = sample_translation(tit->second, i);
+				// Weapon (merged) bones store translation as a delta from their
+				// bind pose; hand bones store absolute local translation.
+				if (m_weapon_bone_start >= 0 && refboneindex >= m_weapon_bone_start)
+					xb.transform.translation = refbone.transform.translation + anim_t;
+				else
+					xb.transform.translation = anim_t;
+			}
 
 			refframe[refboneindex] = xb;
 			++refboneindex;
@@ -301,14 +312,13 @@ bool XAnim::read_xanim_file(BinaryReader &rd)
 		m_refframes.push_back(refframe);
 	}
 	u8 notify_count = rd.read<u8>();
-        for (int i = 0; i < notify_count; ++i)
-        {
-		//TODO: write this to xanim_export
-                std::string notify_string;
-                rd.read_null_terminated_string(notify_string);
-                u16 notify_time_value = rd.read<u16>();
-                printf("notify string: %s:%f, frame: %d\n", notify_string.c_str(), ((float)notify_time_value / ((float)m_numframes)), notify_time_value);
-        }
+	for (int i = 0; i < notify_count; ++i)
+	{
+		std::string notify_string;
+		rd.read_null_terminated_string(notify_string);
+		u16 notify_time_value = rd.read<u16>(); //0-based frame, matches our frame output
+		m_notetracks.push_back({ notify_string, notify_time_value });
+	}
 	return true;
 }
 
@@ -359,12 +369,28 @@ bool XAnim::export_file(const std::string& filename)
 		}
 	}
 	fprintf(fp, "NOTETRACKS\n");
+	fprintf(fp, "\n");
 	refboneidx = 0;
 	for (auto& it : m_reference->parts.bones)
 	{
-		fprintf(fp, "PART %d\n", refboneidx++);
-		fprintf(fp, "NUMTRACKS 0\n");
-		fprintf(fp, "\n");
+		fprintf(fp, "PART %d\n", refboneidx);
+		// notetracks are attached to PART 0 (matches the mod-tool output)
+		if (refboneidx == 0 && !m_notetracks.empty())
+		{
+			fprintf(fp, "NUMTRACKS 1\n");
+			fprintf(fp, "\n");
+			fprintf(fp, "NOTETRACK 0\n");
+			fprintf(fp, "NUMKEYS %d\n", (int)m_notetracks.size());
+			for (auto& nt : m_notetracks)
+				fprintf(fp, "FRAME %d \"%s\"\n", (int)nt.second, nt.first.c_str());
+			fprintf(fp, "\n");
+		}
+		else
+		{
+			fprintf(fp, "NUMTRACKS 0\n");
+			fprintf(fp, "\n");
+		}
+		++refboneidx;
 	}
 	fclose(fp);
 	return true;

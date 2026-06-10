@@ -267,6 +267,9 @@ struct XAnim
 
 	std::map<int, XAnimFrame> m_animframes;
 	std::vector<std::vector<Bone>> m_refframes;
+	std::vector<std::pair<std::string, u16>> m_notetracks; //binary notify entries: (sound name, 0-based frame)
+	XModel m_merged_reference; //full skeleton (hands rig + weapon bones) used as the export reference
+	int m_weapon_bone_start = -1; //index of the first merged weapon bone; their anim translations are deltas from bind
 
 	void read_translations(const std::string& tag);
 	void read_rotations(const std::string& tag, bool flipquat, bool simplequat);
@@ -274,3 +277,7 @@ struct XAnim
 	bool read_xanim_file(BinaryReader&);
 	bool export_file(const std::string& filename);
 };
+
+// Parse a bone skeleton from an XMODEL_EXPORT text file (hierarchy + world bind
+// matrices) into Bone entries holding parent-relative (local) transforms.
+bool read_xmodel_export_skeleton(const std::string& path, std::vector<Bone>& out);

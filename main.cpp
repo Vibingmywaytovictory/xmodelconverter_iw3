@@ -143,7 +143,47 @@ bool read_animation(XModel &xm, XAnim& xa, const std::string& basepath, const st
 		printf("There's no valid xmodel loaded at the moment, please pass a model as reference as argument before the animation.\n");
 		return false;
 	}
-	xa.m_reference = &xm;
+	// Build the export reference skeleton. The binary xanim animates the full
+	// hand+weapon rig, but the weapon model only carries weapon bones. If a hands
+	// skeleton (XMODEL_EXPORT) exists in <basepath>/hands_skeleton, merge it with
+	// the weapon model so every animated bone is exported with correct hierarchy.
+	int sep = path.find('/') == std::string::npos ? '\\' : '/';
+	std::string hands_dir = basepath + "hands_skeleton";
+	std::string hands_path = util::find_first_xmodel_export(hands_dir, sep);
+	std::vector<Bone> hands_bones;
+	if (!hands_path.empty() && read_xmodel_export_skeleton(hands_path, hands_bones) && !hands_bones.empty())
+	{
+		int H = (int)hands_bones.size();
+		// the weapon root attaches at tag_weapon in the hands skeleton
+		int tag_weapon_idx = -1;
+		for (int i = 0; i < H; ++i)
+		{
+			if (util::to_lower(hands_bones[i].name) == "tag_weapon")
+			{
+				tag_weapon_idx = i;
+				break;
+			}
+		}
+		std::vector<Bone> merged = hands_bones;
+		for (auto wb : xm.parts.bones)
+		{
+			if (wb.parent < 0)
+				wb.parent = tag_weapon_idx; // weapon root -> tag_weapon
+			else
+				wb.parent = wb.parent + H;  // preserve weapon-internal hierarchy
+			merged.push_back(wb);
+		}
+		xa.m_merged_reference.parts.bones = merged;
+		xa.m_reference = &xa.m_merged_reference;
+		xa.m_weapon_bone_start = H; //weapon bones follow the hands; their anim translations are deltas from bind
+		printf("Merged hands skeleton (%d bones) with weapon model (%d bones) -> %d parts\n",
+			H, (int)xm.parts.bones.size(), (int)merged.size());
+	}
+	else
+	{
+		xa.m_reference = &xm; // no hands skeleton found: weapon-only (legacy behaviour)
+	}
+
 	if (!xa.read_xanim_file(rd))
 	{
 		printf("Failed to read xanim file '%s', error: %s\n", path.c_str(), rd.get_error_message().c_str());

@@ -1,5 +1,8 @@
 #include "types.h"
 #include "util.h"
+#include <cstdio>
+#include <glm/matrix.hpp>            // glm::transpose
+#include <glm/gtc/quaternion.hpp>    // glm::quat_cast
 
 bool XModel::read_xmodel_file(BinaryReader& rd)
 {
@@ -236,5 +239,93 @@ bool XModel::export_file(const std::string& filename)
 	}
 	//if(fp != stdout)
 	fclose(fp);
+	return true;
+}
+
+bool read_xmodel_export_skeleton(const std::string& path, std::vector<Bone>& out)
+{
+	std::ifstream in(path);
+	if (!in.is_open())
+		return false;
+
+	struct Raw
+	{
+		std::string name;
+		int parent = -1;
+		glm::mat3 R = glm::mat3(1.f); //world-space rotation (columns X,Y,Z)
+		glm::vec3 t = glm::vec3(0.f); //world-space position
+	};
+	std::vector<Raw> raw;
+	auto ensure = [&](int idx) { if (idx >= 0 && (int)raw.size() <= idx) raw.resize(idx + 1); };
+
+	std::string line;
+	int cur = -1; //current BONE matrix block
+	while (std::getline(in, line))
+	{
+		if (!line.empty() && line.back() == '\r')
+			line.pop_back();
+		// commas are used as separators in the matrix rows; treat them as spaces
+		for (char& ch : line)
+			if (ch == ',') ch = ' ';
+
+		int idx = -1, parent = -1;
+		char namebuf[256];
+		if (sscanf(line.c_str(), "BONE %d %d \"%255[^\"]\"", &idx, &parent, namebuf) == 3)
+		{
+			ensure(idx);
+			raw[idx].name = namebuf;
+			raw[idx].parent = parent;
+			cur = -1;
+		}
+		else if (sscanf(line.c_str(), "BONE %d", &idx) == 1)
+		{
+			ensure(idx);
+			cur = idx;
+		}
+		else if (cur >= 0)
+		{
+			float a, b, c;
+			if (sscanf(line.c_str(), "OFFSET %f %f %f", &a, &b, &c) == 3)
+				raw[cur].t = glm::vec3(a, b, c);
+			else if (sscanf(line.c_str(), "X %f %f %f", &a, &b, &c) == 3)
+				raw[cur].R[0] = glm::vec3(a, b, c); //column 0
+			else if (sscanf(line.c_str(), "Y %f %f %f", &a, &b, &c) == 3)
+				raw[cur].R[1] = glm::vec3(a, b, c); //column 1
+			else if (sscanf(line.c_str(), "Z %f %f %f", &a, &b, &c) == 3)
+				raw[cur].R[2] = glm::vec3(a, b, c); //column 2
+		}
+	}
+	if (raw.empty())
+		return false;
+
+	out.clear();
+	out.resize(raw.size());
+	for (size_t i = 0; i < raw.size(); ++i)
+	{
+		Bone b;
+		b.name = raw[i].name;
+		b.parent = raw[i].parent;
+
+		glm::mat3 localR;
+		glm::vec3 localT;
+		int p = raw[i].parent;
+		if (p < 0 || p >= (int)raw.size())
+		{
+			//root: local == world
+			localR = raw[i].R;
+			localT = raw[i].t;
+		}
+		else
+		{
+			//local = inverse(parentWorld) * world  (rotation inverse == transpose)
+			glm::mat3 pT = glm::transpose(raw[p].R);
+			localR = pT * raw[i].R;
+			localT = pT * (raw[i].t - raw[p].t);
+		}
+		b.transform.rotation = glm::quat_cast(localR);
+		b.transform.translation = localT;
+		b.transform.scale = glm::vec3(1.f);
+		out[i] = b;
+	}
 	return true;
 }
