@@ -1,3 +1,0 @@
-C:/Users/olku/xmodelconverteriw3/build/CMakeFiles/xmodelconverteriw3.dir
-C:/Users/olku/xmodelconverteriw3/build/CMakeFiles/ALL_BUILD.dir
-C:/Users/olku/xmodelconverteriw3/build/CMakeFiles/ZERO_CHECK.dir
