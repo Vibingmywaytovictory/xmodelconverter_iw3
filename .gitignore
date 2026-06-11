@@ -10,6 +10,3 @@ Release/
 .vs/
 chat.md
 glm/
-
-# CMake out-of-source build directory (single canonical folder)
-/build/

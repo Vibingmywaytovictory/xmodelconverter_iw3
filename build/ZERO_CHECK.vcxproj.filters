@@ -1,0 +1,13 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <CustomBuild Include="C:\Users\olku\xmodelconverter_iw3\build\CMakeFiles\4bdc4438c1002226b2da78fe9c67bd45\generate.stamp.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="CMake Rules">
+      <UniqueIdentifier>{2360807C-4B39-3698-AC0F-4B3E248CF2E1}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>
