@@ -48,6 +48,8 @@ bool XModelSurface::read_xmodelsurface_file(XModelParts &parts, BinaryReader &rd
 				rd.read<u16>();             // bonesPerVert of the first group
 				for (;;)
 				{
+					if (rd.m_pos + 4 > rd.m_buf.size())
+						return rd.set_error_message("xmodelsurfs surface %d: header overran buffer (unsupported variant)\n", i);
 					u16 groupcount = rd.read<u16>();
 					rd.read<u16>();         // bonesPerVert (or terminator's second half)
 					if (groupcount == 0)
@@ -80,6 +82,14 @@ bool XModelSurface::read_xmodelsurface_file(XModelParts &parts, BinaryReader &rd
 				rd.read<u16>();
 			}
 		}
+
+		// A desynced/unsupported v25 surface header (e.g. m16m203 grenade
+		// surfaces) yields bogus counts; bail cleanly instead of reading past the
+		// buffer and crashing. Each vertex is at least 48 bytes, each tri 6.
+		size_t remaining = rd.m_pos <= rd.m_buf.size() ? rd.m_buf.size() - rd.m_pos : 0;
+		if (rd.m_pos > rd.m_buf.size() ||
+			(size_t)vertcount * 48 + (size_t)tricount * 6 > remaining)
+			return rd.set_error_message("xmodelsurfs surface %d: implausible counts (verts=%d tris=%d), unsupported variant\n", i, vertcount, tricount);
 
 		for (int j = 0; j < vertcount; ++j)
 		{
@@ -129,6 +139,8 @@ bool XModelSurface::read_xmodelsurface_file(XModelParts &parts, BinaryReader &rd
 					vtx.boneindices[k + 1] = blendindex;
 				}
 			}
+			if (boneindex >= parts.bones.size())
+				return rd.set_error_message("xmodelsurfs surface %d: bone index %d out of range (unsupported variant)\n", i, boneindex);
 			auto transform = util::get_world_transform(parts.bones, boneindex);
 			vtx.pos = glm::rotate(transform.rotation, offset) + transform.translation;
 			vtx.normal = glm::rotate(transform.rotation, vtx.normal);
@@ -144,6 +156,8 @@ bool XModelSurface::read_xmodelsurface_file(XModelParts &parts, BinaryReader &rd
 
 			for (int j = 0; j < 3; ++j)
 			{
+				if (face[j] >= vertices.size())
+					return rd.set_error_message("xmodelsurfs surface %d: face index %d out of range (unsupported variant)\n", i, face[j]);
 				this->vertices.push_back(vertices.at(face[j]));
 				mesh.indices.push_back(idx++);
 			}

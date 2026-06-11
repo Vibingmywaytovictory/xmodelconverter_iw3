@@ -181,15 +181,12 @@ void XAnim::read_rotations(const std::string& tag, bool flipquat, bool simplequa
 			frames.push_back(m_reader->read<u8>());
 	}
 
-	// v17: the simple-quat flag is only a *candidate*. Most flagged bones still
-	// store full 3x i16 rotations; only single-axis ones use the 2-byte form.
-	// Decide by checking whether reading full rotations would leave a valid
-	// translation block - if not, this bone uses the 2-byte form.
+	// v17: the simple-quat flag is not authoritative - some single-axis bones
+	// (notably grenade-launcher slider/ammo bones) store 2-byte rotations without
+	// the flag set. So always probe: use the 2-byte form only if reading full
+	// 3x i16 rotations would leave a malformed translation block.
 	if (m_version == 0x11)
-	{
-		if (simplequat)
-			simplequat = !peek_translation_valid(m_reader->m_pos + (size_t)numrot * 6);
-	}
+		simplequat = !peek_translation_valid(m_reader->m_pos + (size_t)numrot * 6);
 
 	for (int i = 0; i < numrot; ++i)
 	{
